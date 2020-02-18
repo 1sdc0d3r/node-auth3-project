@@ -7,12 +7,6 @@ const jwt = require("jsonwebtoken");
 const session = require("express-session");
 
 const server = express();
-
-server.use(morgan("combined"));
-server.use(helmet());
-server.use(express.json());
-server.use(session(sessionConfig));
-
 const sessionConfig = {
   name: "banana", // default "sid"
   secret: process.env.COOKIE_SECRET,
@@ -25,7 +19,12 @@ const sessionConfig = {
   saveUninitialized: false //GDPR laws against setting cookies automatically
 };
 
-server.get("/api/users", (req, res) => {
+server.use(morgan("combined"));
+server.use(helmet());
+server.use(express.json());
+server.use(session(sessionConfig));
+
+server.get("/api/users", restricted, (req, res) => {
   db.find().then(users => res.status(200).json(users));
 });
 
@@ -49,8 +48,11 @@ server.post("/api/login", (req, res) => {
   db.findUser(username)
     .then(user => {
       if (user && bcrypt.compareSync(password, user.password)) {
+        req.session.userId = user.id;
         const token = generateToken(user);
-        res.status(200).json({ message: "successfully logged in", token });
+        res
+          .status(200)
+          .json({ message: `successfully logged in as ${username}`, token });
       } else {
         res.status(401).json({ message: "invalid credentials" });
       }
@@ -58,6 +60,18 @@ server.post("/api/login", (req, res) => {
     .catch(err =>
       res.status(500).json({ errorMessage: "unable to login", error: err })
     );
+});
+
+server.get("/api/logout", (req, res) => {
+  if (req.session.user) {
+    req.session.destroy(err =>
+      err
+        ? res.json({ message: "you can never leave" })
+        : res.status(200).json({ message: "logout was successful" })
+    );
+  } else {
+    res.status(200).json({ message: "You were never here to start" });
+  }
 });
 
 server.use("/", (req, res) => {
@@ -75,4 +89,12 @@ function generateToken(user) {
     expiresIn: "1d"
   };
   return jwt.sign(payload, process.env.JWT_SECRET || "none to stand", options);
+}
+
+function restricted(req, res, next) {
+  if (req.session && req.session.userId) {
+    next();
+  } else {
+    res.status(401).json({ message: "you shall not pass" });
+  }
 }
